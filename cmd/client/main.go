@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -23,6 +24,13 @@ import (
 )
 
 func main() {
+	dryRunPtr := flag.Bool(
+		"dry-run",
+		false,
+		"Whether the command should perform the request",
+	)
+	flag.Parse()
+
 	// Read LNURL from STDIN.
 	lnurlBech32, err := readLNURL()
 	if err != nil {
@@ -71,13 +79,15 @@ func main() {
 	authURL.RawQuery = query.Encode()
 	fmt.Printf("  Authed URL = %s\n", authURL.String())
 
-	// Request authentication to the server.
-	// if err := requestAuth(authURL); err != nil {
-	// 	fmt.Fprintf(os.Stdout, "❌ Error: auth request failed: %s\n", err.Error())
-	// 	return
-	// }
+	if !*dryRunPtr {
+		// Request authentication to the server.
+		if err := requestAuth(authURL); err != nil {
+			fmt.Fprintf(os.Stdout, "❌ Error: auth request failed: %s\n", err.Error())
+			return
+		}
 
-	// fmt.Println("✅ Authentication success")
+		fmt.Println("✅ Authentication success")
+	}
 }
 
 func readLNURL() (string, error) {
@@ -88,9 +98,7 @@ func readLNURL() (string, error) {
 		return "", err
 	}
 
-	if strings.HasPrefix(lnurlBech32, pkg.LNURLProtocolPrefix) {
-		lnurlBech32 = lnurlBech32[len(pkg.LNURLProtocolPrefix):]
-	}
+	lnurlBech32 = strings.TrimPrefix(lnurlBech32, pkg.LNURLProtocolPrefix)
 	return strings.TrimSpace(lnurlBech32), nil
 }
 
