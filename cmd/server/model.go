@@ -4,6 +4,6 @@ import "time"
 
 type AuthChallenge struct {
 	LNURL     string    `json:"lnurl"`
-	QRCodeURL string    `json:"qrcode"`
+	QRCodeURL string    `json:"qrcodeUrl"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }

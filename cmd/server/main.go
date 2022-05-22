@@ -1,12 +1,17 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"fmt"
+	"html/template"
 	"log"
 
 	"github.com/gin-gonic/gin"
 )
+
+//go:embed templates/*
+var f embed.FS
 
 func main() {
 	portPtr := flag.Int("port", 8080, "TCP port to run")
@@ -22,14 +27,15 @@ func main() {
 
 func runServer(hostname string, port int) {
 	lnurlAuth := NewAuth(hostname)
+	handler := NewHandler(lnurlAuth)
 
 	r := gin.Default()
+	tmpl := template.Must(template.New("").
+		Funcs(template.FuncMap{"safeURL": SafeURL}).
+		ParseFS(f, "templates/*.tmpl"))
+	r.SetHTMLTemplate(tmpl)
 
-	r.GET("/", func(c *gin.Context) {
-		// TODO: return web
-	})
-
-	r.GET("/challenge", lnurlAuth.Middleware, lnurlAuth.Challenge)
+	r.GET("/", lnurlAuth.Middleware, handler.Home)
 	r.GET("/login", lnurlAuth.Login)
 
 	r.Run(fmt.Sprintf(":%d", port))

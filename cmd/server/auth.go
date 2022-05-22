@@ -60,7 +60,7 @@ func (a *Auth) Middleware(c *gin.Context) {
 	// If the request doesn't include session ID cookie, create and set a new
 	// session ID.
 	if err != nil {
-		sessionID = a.random32BytesHex()
+		sessionID = random32BytesHex()
 		c.Set(sessionIDContextKey, sessionID)
 		c.SetCookie(
 			sessionKey,
@@ -76,50 +76,29 @@ func (a *Auth) Middleware(c *gin.Context) {
 
 	c.Set(sessionIDContextKey, sessionIDContextKey)
 
-	// Try to retrieve linking key from the session cache.
-	linkingKey, ok := a.sessionCache.Get(sessionID)
+	// Try to retrieve linking key.
+	linkingKey, ok := a.LinkingKey(sessionID)
 	if ok {
-		// Set the linking key to the request context.
+		// If the user is signed in, set the linking key to the request context.
 		c.Set(linkingKeyContextKey, linkingKey)
 	}
 }
 
-// Challenge is a Gin handler to get LNURL for the Lightning wallet
-// application. It generates a k1 challenge (a random data for the wallet
-// application to sign), creates a mapping with the session ID by looking up
-// the request context and setting into the challenge cache and then returns the
-// LNURL that embeds the k1 challenge. A QR code image for the LNURL is also
-// provided for convenience.
-func (a *Auth) Challenge(c *gin.Context) {
-	// Get session id from the request context.
-	sessionIDIntf, ok := c.Get(sessionIDContextKey)
-	if !ok {
-		c.JSON(
-			http.StatusInternalServerError,
-			gin.H{"error": "unexpected a request context with no session id"},
-		)
-		return
-	}
-
-	sessionID, ok := sessionIDIntf.(string)
-	if !ok {
-		c.JSON(
-			http.StatusInternalServerError,
-			gin.H{"error": "unexpected session id with invalid type"},
-		)
-		return
-	}
-
+// Challenge returns LNURL for the Lightning wallet application. It generates
+// a k1 challenge (a random data for the wallet application to sign), creates a
+// mapping with the session ID by setting into the challenge cache and then
+// returns the LNURL that embeds the k1 challenge. A QR code image for the LNURL
+// is also provided for convenience.
+func (a *Auth) Challenge(sessionID string) (AuthChallenge, error) {
 	// Create a random k1 challenge and add a mapping to session id to the
 	// challenge cache.
-	k1 := a.random32BytesHex()
+	k1 := random32BytesHex()
 	if err := a.challengeCache.Add(
 		k1,
 		sessionID,
 		cache.DefaultExpiration,
 	); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return AuthChallenge{}, err
 	}
 
 	// Construct a login URL for the Lightning wallet application to call. This
@@ -135,8 +114,7 @@ func (a *Auth) Challenge(c *gin.Context) {
 	// application.
 	lnurl, err := lnurl.LNURLEncode(actualURL)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return AuthChallenge{}, err
 	}
 
 	// Append bech32-encoded URL with lightning protocol so that the operating
@@ -146,16 +124,15 @@ func (a *Auth) Challenge(c *gin.Context) {
 	// Generate a QR code image for the encoded LNURL
 	qrcodePNG, err := qrcode.Encode(lnurl, qrcode.Medium, 256)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+		return AuthChallenge{}, err
 	}
 
-	c.JSON(http.StatusOK, AuthChallenge{
+	return AuthChallenge{
 		LNURL: lnurl,
 		QRCodeURL: "data:image/png;base64," +
 			base64.StdEncoding.EncodeToString(qrcodePNG),
 		ExpiresAt: time.Now().Add(time.Second * sessionAge),
-	})
+	}, nil
 }
 
 // Login is a Gin handler to handle the request with signed k1 challenge from
@@ -220,7 +197,24 @@ func (a *Auth) Login(c *gin.Context) {
 	})
 }
 
-func (s *Auth) random32BytesHex() string {
+// LinkingKey returns linking key matched with the session ID by reading the
+// session cache. If the linking key does not exist, it will return false in
+// the second return value.
+func (a *Auth) LinkingKey(sessionID string) (string, bool) {
+	linkingKeyIntf, ok := a.sessionCache.Get(sessionID)
+	if !ok {
+		return "", false
+	}
+
+	linkingKey, ok := linkingKeyIntf.(string)
+	if !ok {
+		return "", false
+	}
+
+	return linkingKey, true
+}
+
+func random32BytesHex() string {
 	data := make([]byte, 32)
 	_, _ = rand.Read(data)
 	return hex.EncodeToString(data)
