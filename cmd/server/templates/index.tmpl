@@ -32,8 +32,9 @@
         background-color: rgba(255, 255, 255, 0.2);
       }
 
-      .qrcode {
-        margin: 16px 0;
+      .linking-key {
+        margin-top: 16px;
+        color: #fd0;
       }
 
       .lightning-button {
@@ -44,21 +45,14 @@
         text-align: center;
       }
     </style>
-
-    <script>
-      setTimeout(() => location.reload(), 2000);
-    </script>
   </head>
 
   <body>
     <div class="container">
-      <div>Scan the QR code below</div>
-      <div class="qrcode">
-        <img src="{{.QRCodeURL|safeURL}}" />
-      </div>
-      <div>or</div>
-      <a class="lightning-button" href="{{.LNURL|safeURL}}">
-        Open in Lightning
+      <div>You are currently logged in as:</div>
+      <div class="linking-key">{{.LinkingKey}}</div>
+      <a class="lightning-button" href="/logout">
+        Logout
       </a>
     </div>
   </body>

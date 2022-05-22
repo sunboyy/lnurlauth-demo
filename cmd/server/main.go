@@ -37,6 +37,7 @@ func runServer(hostname string, port int) {
 
 	r.GET("/", lnurlAuth.Middleware, handler.Home)
 	r.GET("/login", lnurlAuth.Login)
+	r.GET("/logout", lnurlAuth.Middleware, handler.Logout)
 
 	r.Run(fmt.Sprintf(":%d", port))
 }

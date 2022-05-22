@@ -34,14 +34,29 @@ type Auth struct {
 	// challengeCache is a storage of the randomized k1 challenge. Only the
 	// k1 stored in this cache can be used to login.
 	challengeCache *cache.Cache
+
+	// reverseChallengeCache is a reverse mapping of challengeCache. Instead of
+	// storing mappings from k1 challenge to session ID, this variable stores
+	// mappings from session ID to k1 challenge.
+	reverseChallengeCache *cache.Cache
 }
 
 // NewAuth is a constructor for `Auth`.
 func NewAuth(hostname string) *Auth {
 	return &Auth{
-		hostname:       hostname,
-		sessionCache:   cache.New(time.Second*sessionAge, time.Minute*10),
-		challengeCache: cache.New(time.Second*sessionAge, time.Minute*10),
+		hostname: hostname,
+		sessionCache: cache.New(
+			time.Second*sessionAge,
+			time.Minute*10,
+		),
+		challengeCache: cache.New(
+			time.Second*sessionAge,
+			time.Minute*10,
+		),
+		reverseChallengeCache: cache.New(
+			time.Second*sessionAge,
+			time.Minute*10,
+		),
 	}
 }
 
@@ -90,14 +105,9 @@ func (a *Auth) Middleware(c *gin.Context) {
 // returns the LNURL that embeds the k1 challenge. A QR code image for the LNURL
 // is also provided for convenience.
 func (a *Auth) Challenge(sessionID string) (AuthChallenge, error) {
-	// Create a random k1 challenge and add a mapping to session id to the
-	// challenge cache.
-	k1 := random32BytesHex()
-	if err := a.challengeCache.Add(
-		k1,
-		sessionID,
-		cache.DefaultExpiration,
-	); err != nil {
+	// Finds or creates k1 challenge.
+	k1, err := a.k1BySessionID(sessionID)
+	if err != nil {
 		return AuthChallenge{}, err
 	}
 
@@ -133,6 +143,41 @@ func (a *Auth) Challenge(sessionID string) (AuthChallenge, error) {
 			base64.StdEncoding.EncodeToString(qrcodePNG),
 		ExpiresAt: time.Now().Add(time.Second * sessionAge),
 	}, nil
+}
+
+// k1BySessionID finds previously generated k1 challenge if any. Otherwise, it
+// generates a new k1 challenge by randomization and stores to the challenge
+// caches for further authentication.
+func (a *Auth) k1BySessionID(sessionID string) (string, error) {
+	// Finds previously generated k1 challenge in the cache.
+	k1Intf, ok := a.reverseChallengeCache.Get(sessionID)
+	if ok {
+		k1, ok := k1Intf.(string)
+		if ok {
+			return k1, nil
+		}
+	}
+
+	// Create a random k1 challenge.
+	k1 := random32BytesHex()
+
+	// Store a mapping between k1 challenge and session ID to the caches.
+	if err := a.challengeCache.Add(
+		k1,
+		sessionID,
+		cache.DefaultExpiration,
+	); err != nil {
+		return "", err
+	}
+	if err := a.reverseChallengeCache.Add(
+		sessionID,
+		k1,
+		cache.DefaultExpiration,
+	); err != nil {
+		return "", err
+	}
+
+	return k1, nil
 }
 
 // Login is a Gin handler to handle the request with signed k1 challenge from
@@ -192,9 +237,19 @@ func (a *Auth) Login(c *gin.Context) {
 	// to the session cache.
 	a.sessionCache.Set(sessionID, linkingKey, cache.DefaultExpiration)
 
+	// Delete from challenge caches.
+	a.challengeCache.Delete(k1)
+	a.reverseChallengeCache.Delete(sessionID)
+
 	c.JSON(http.StatusOK, pkg.LNURLAuthResponse{
 		Status: pkg.LNURLAuthResponseStatusOK,
 	})
+}
+
+// Logout logs the user out of the system by removing the given session ID from
+// the session cache.
+func (a *Auth) Logout(sessionID string) {
+	a.sessionCache.Delete(sessionID)
 }
 
 // LinkingKey returns linking key matched with the session ID by reading the

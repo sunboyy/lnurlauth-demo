@@ -53,10 +53,36 @@ func (h *Handler) Home(c *gin.Context) {
 		}
 
 		c.HTML(http.StatusOK, "login.tmpl", authChallenge)
+		return
 	}
 
-	// TODO: return another template showing the signed in linking key.
-	_ = linkingKey
+	c.HTML(http.StatusOK, "index.tmpl", gin.H{
+		"LinkingKey": linkingKey,
+	})
+}
+
+// Logout is a Gin handler for logging the user out. It logs the user out from
+// the authentication service, removes session ID from the request cookie and
+// then redirects the user to the index page.
+func (h *Handler) Logout(c *gin.Context) {
+	// Always redirect to home screen.
+	defer c.Redirect(http.StatusTemporaryRedirect, "/")
+
+	sessionIDIntf, ok := c.Get(sessionIDContextKey)
+	if !ok {
+		return
+	}
+
+	sessionID, ok := sessionIDIntf.(string)
+	if !ok {
+		return
+	}
+
+	// Remove session ID from the authentication service.
+	h.auth.Logout(sessionID)
+
+	// Unset session ID cookie.
+	c.SetCookie(sessionKey, "", sessionAge, "/", c.Request.Host, false, true)
 }
 
 func SafeURL(url string) template.URL {
