@@ -4,8 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/fiatjaf/go-lnurl"
@@ -23,8 +23,17 @@ const (
 	linkingKeyContextKey = "linking_key"
 )
 
-// Auth is a set of Gin middleware and handlers for the LNURL-auth strategy.
+// Auth is an authentication service for the server. It utilizes digital
+// signature algorithm to authenticate the user to the system. To authenticate
+// a user, the system generates a random data for the user to sign. The user
+// provides the public key identifying himself and a signature according to the
+// random data that the server generates. Valid signatures indicate that the
+// user is authentic and is allowed to use the system. Auth utilizes LNURL-auth
+// standard (https://github.com/fiatjaf/lnurl-rfc/blob/luds/04.md) so that it
+// is compatible with Bitcoin Lightning Wallet application.
 type Auth struct {
+	// hostname is the host name of the server that the client will call. It is
+	// used for generating LNURL for the Bitcoin Lightning wallet application.
 	hostname string
 
 	// sessionCache is a storage of mappings between session id and linking key
@@ -41,7 +50,7 @@ type Auth struct {
 	reverseChallengeCache *cache.Cache
 }
 
-// NewAuth is a constructor for `Auth`.
+// NewAuth is a constructor of Auth.
 func NewAuth(hostname string) *Auth {
 	return &Auth{
 		hostname: hostname,
@@ -141,7 +150,6 @@ func (a *Auth) Challenge(sessionID string) (AuthChallenge, error) {
 		LNURL: lnurl,
 		QRCodeURL: "data:image/png;base64," +
 			base64.StdEncoding.EncodeToString(qrcodePNG),
-		ExpiresAt: time.Now().Add(time.Second * sessionAge),
 	}, nil
 }
 
@@ -180,57 +188,29 @@ func (a *Auth) k1BySessionID(sessionID string) (string, error) {
 	return k1, nil
 }
 
-// Login is a Gin handler to handle the request with signed k1 challenge from
-// Lightning wallet application. The following query params must be set:
-//   - tag: fixed value "login"
-//   - k1: the challenge from `Challenge` handler
-//   - key: the identity of the user as public key (linking key)
-//   - sig: the signature that verifies the identity of the user
-//
-// It finds the session ID related to the k1 challenge in the challenge cache
-// and verifies the given signature. If the session ID is found and the
-// signature is valid, the linking key will be set to the session cache.
-func (a *Auth) Login(c *gin.Context) {
-	// From the RFC (https://github.com/fiatjaf/lnurl-rfc/blob/luds/04.md), the
-	// request must have the query `tag` to `login`.
-	if c.Query("tag") != "login" {
-		c.JSON(
-			http.StatusBadRequest,
-			createErrorResponse("query parameter `tag` is not 'login'"),
-		)
-		return
-	}
-
-	k1 := c.Query("k1")
-	linkingKey := c.Query("key")
-	signature := c.Query("sig")
-
+// Login logs the user in to the system using digital signature algorithm. It
+// finds the session ID related to the k1 challenge in the challenge cache and
+// verifies the given signature. If the session ID is found and the signature is
+// valid, the linking key will be set to the session cache.
+func (a *Auth) Login(k1 string, linkingKey string, signature string) error {
 	// Find the session ID in the challenge cache.
 	sessionIDInf, ok := a.challengeCache.Get(k1)
 	if !ok {
-		c.JSON(
-			http.StatusBadRequest,
-			createErrorResponse("no session id found for this k1 challenge"),
-		)
+		return errors.New("no session id found for this k1 challenge")
 	}
 
 	sessionID, ok := sessionIDInf.(string)
 	if !ok {
-		c.JSON(
-			http.StatusInternalServerError,
-			createErrorResponse("unexpected session id with invalid type"),
-		)
+		return errors.New("unexpected session id with invalid type")
 	}
 
 	// Verify the signature with the k1 challenge.
 	ok, err := lnurl.VerifySignature(k1, signature, linkingKey)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, createErrorResponse(err.Error()))
-		return
+		return err
 	}
 	if !ok {
-		c.JSON(http.StatusBadRequest, createErrorResponse("invalid signature"))
-		return
+		return errors.New("invalid signature")
 	}
 
 	// If the signature is correct, add a mapping from session id to linking key
@@ -241,9 +221,7 @@ func (a *Auth) Login(c *gin.Context) {
 	a.challengeCache.Delete(k1)
 	a.reverseChallengeCache.Delete(sessionID)
 
-	c.JSON(http.StatusOK, pkg.LNURLAuthResponse{
-		Status: pkg.LNURLAuthResponseStatusOK,
-	})
+	return nil
 }
 
 // Logout logs the user out of the system by removing the given session ID from
@@ -269,15 +247,10 @@ func (a *Auth) LinkingKey(sessionID string) (string, bool) {
 	return linkingKey, true
 }
 
+// random32BytesHex generates a random 32-byte data in a hexadecimal string
+// format.
 func random32BytesHex() string {
 	data := make([]byte, 32)
 	_, _ = rand.Read(data)
 	return hex.EncodeToString(data)
-}
-
-func createErrorResponse(reason string) pkg.LNURLAuthResponse {
-	return pkg.LNURLAuthResponse{
-		Status: pkg.LNURLAuthResponseStatusError,
-		Reason: reason,
-	}
 }
