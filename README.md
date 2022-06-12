@@ -17,3 +17,17 @@ go run ./cmd/server \
 ```
 
 ## Client
+
+`cmd/client` directory contains all the mandatory tools used for authentication as a client. It performs as a Bitcoin Lightning Wallet application that can generate seeds, derive public-private key pairs and authenticate user from the derived keys.
+
+Before authentication, users have to set up their wallet using the following command. This will generates a random mnemonic acting as a master private key.
+
+```sh
+go run ./cmd/client mnemonic
+```
+
+After mnemonic is generated as `mnemonic.txt` file, you can now authenticate using LNURL using the following command, replacing `<lnurl>` with your desired URL.
+
+```sh
+go run ./cmd/client auth <lnurl>
+```

@@ -15,7 +15,11 @@ var f embed.FS
 
 func main() {
 	portPtr := flag.Int("port", 8080, "TCP port to run")
-	hostnamePtr := flag.String("hostname", "", "Hostname of the server (e.g. http://192.168.1.10:8080)")
+	hostnamePtr := flag.String(
+		"hostname",
+		"",
+		"Hostname of the server (e.g. http://192.168.1.10:8080)",
+	)
 	flag.Parse()
 
 	if *hostnamePtr == "" {
